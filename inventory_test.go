@@ -174,34 +174,50 @@ func TestReserveMultiple_ProductNotFound(t *testing.T) {
 
 func TestReserveMultiple_ConcurrentSafety(t *testing.T) {
 	svc := NewSafeInventoryService(map[string]*Product{
-		"a": {ID: "a", Name: "Product A", Stock: 50},
-		"b": {ID: "b", Name: "Product B", Stock: 50},
+		"a": {ID: "a", Name: "Product A", Stock: 30},
+		"b": {ID: "b", Name: "Product B", Stock: 30},
 	})
 
 	const goroutines = 100
-	var wg, start sync.WaitGroup
+	var (
+		wg, start sync.WaitGroup
+		successMu sync.Mutex
+		successes int
+		failures  int
+	)
 	start.Add(1)
 	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
 			start.Wait()
-			svc.ReserveMultiple([]ReserveItem{
+			err := svc.ReserveMultiple([]ReserveItem{
 				{ProductID: "a", Quantity: 1},
 				{ProductID: "b", Quantity: 1},
 			})
+
+			successMu.Lock()
+			defer successMu.Unlock()
+			if err == nil {
+				successes++
+			} else {
+				failures++
+			}
 		}()
 	}
 	start.Done()
 	wg.Wait()
 
+	if successes != 30 {
+		t.Errorf("expected 30 successes, got %d", successes)
+	}
+	if failures != 70 {
+		t.Errorf("expected 70 failures, got %d", failures)
+	}
 	a := svc.GetStock("a")
 	b := svc.GetStock("b")
 	if a != b {
 		t.Errorf("stocks diverged: a=%d b=%d", a, b)
-	}
-	if a < 0 || b < 0 {
-		t.Errorf("negative stock: a=%d b=%d", a, b)
 	}
 	if a != 0 {
 		t.Errorf("expected stock 0, got a=%d b=%d", a, b)
